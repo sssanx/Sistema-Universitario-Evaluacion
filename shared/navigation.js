@@ -133,16 +133,16 @@ export function moduleLinks(module, role) {
         ["/evaluacion-docente/docente/asignaturas", "Asignaturas"],
         ["/evaluacion-docente/docente/planes", "Plan de mejora"],
       ];
-    return [
-      ["/evaluacion-docente/direccion/periodos", "Periodos"],
-      ["/evaluacion-docente/direccion/cuestionarios", "Cuestionarios"],
-      ["/evaluacion-docente/direccion/grupos", "Asignaciones"],
-      ["/evaluacion-docente/direccion/comentarios", "Comentarios"],
-      ["/evaluacion-docente/direccion/resultados", "Resultados"],
-      ["/evaluacion-docente/direccion/planes-accion", "Planes de mejora"],
-      ["/evaluacion-docente/direccion/docentes", "Docentes"],
-      ["/evaluacion-docente/direccion/estudiantes", "Estudiantes"],
-    ];
+return [
+  ["/evaluacion-docente/direccion/periodos", "Periodos"],
+  ["/evaluacion-docente/direccion/cuestionarios", "Cuestionarios"],
+  ["/evaluacion-docente/direccion/docentes", "Docentes"],
+  ["/evaluacion-docente/direccion/estudiantes", "Estudiantes"],
+  ["/evaluacion-docente/direccion/grupos", "Asignaciones"],
+  ["/evaluacion-docente/direccion/comentarios", "Comentarios"],
+  ["/evaluacion-docente/direccion/resultados", "Resultados"],
+  ["/evaluacion-docente/direccion/planes-accion", "Planes de mejora"],
+];
   }
   return [
     ["/titulacion", role === "estudiante" ? "Mi expediente" : "Solicitudes"],

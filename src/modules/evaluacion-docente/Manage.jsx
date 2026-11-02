@@ -387,6 +387,36 @@ export function ManageAssignments() {
   const state = useAsync(() => api(`${BASE}/asignaciones`), []),
     people = useAsync(() => api(`${BASE}/personas`), []),
     periods = useAsync(() => api(`${BASE}/periodos`), []);
+    const groupedAssignments = Object.values(
+  (state.data || []).reduce((groups, assignment) => {
+    const key = [
+      assignment.period_id,
+      assignment.group_name,
+      assignment.teacher_id,
+      assignment.subject
+    ].join("|");
+
+    if (!groups[key]) {
+      groups[key] = {
+        key,
+        period_title: assignment.period_title,
+        group_name: assignment.group_name,
+        teacher_name: assignment.teacher_name,
+        subject: assignment.subject,
+        total: 0,
+        submitted: 0
+      };
+    }
+
+    groups[key].total++;
+
+    if (assignment.submitted) {
+      groups[key].submitted++;
+    }
+
+    return groups;
+  }, {})
+);
   const [dialog, setDialog] = useState(false),
     mutation = useMutation();
   async function submit(e) {
@@ -438,35 +468,43 @@ export function ManageAssignments() {
           aria-label="Asignaciones"
           tabIndex={0}
         >
-          <table>
-            <thead>
-              <tr>
-                <th>Periodo y asignatura</th>
-                <th>Docente</th>
-                <th>Estudiante</th>
-                <th>Grupo</th>
-                <th>Participación</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.data?.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    {a.subject}
-                    <small>{a.period_title}</small>
-                  </td>
-                  <td>{a.teacher_name}</td>
-                  <td>{a.student_name}</td>
-                  <td>{a.group_name}</td>
-                  <td>
-                    <Status value={a.submitted ? "enviada" : "pendiente"}>
-                      {a.submitted ? "Enviada" : "Pendiente"}
-                    </Status>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+         <table>
+  <thead>
+    <tr>
+      <th>Periodo y asignatura</th>
+      <th>Docente</th>
+      <th>Grupo</th>
+      <th>Estudiantes</th>
+      <th>Participación</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {groupedAssignments.map((group) => (
+      <tr key={group.key}>
+        <td>
+          {group.subject}
+          <small>{group.period_title}</small>
+        </td>
+
+        <td>{group.teacher_name}</td>
+
+        <td>{group.group_name}</td>
+
+        <td>{group.total}</td>
+
+        <td>
+          <strong>
+            {group.submitted} de {group.total}
+          </strong>
+          <small>
+            {group.total - group.submitted} pendientes
+          </small>
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
         </div>
       </LoadState>
       {dialog && (
