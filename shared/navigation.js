@@ -138,6 +138,7 @@ return [
   ["/evaluacion-docente/direccion/cuestionarios", "Cuestionarios"],
   ["/evaluacion-docente/direccion/docentes", "Docentes"],
   ["/evaluacion-docente/direccion/estudiantes", "Estudiantes"],
+  ["/evaluacion-docente/direccion/grupos-academicos", "Grupos académicos"],
   ["/evaluacion-docente/direccion/grupos", "Asignaciones"],
   ["/evaluacion-docente/direccion/comentarios", "Comentarios"],
   ["/evaluacion-docente/direccion/resultados", "Resultados"],
