@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, aliased
 from ...core.database import get_db
 from ...core.models import User, AccountEvent, Notification, now
 from ...core.security import current_user, require_role, PRODUCTION
-from .models import Questionnaire, Period, Assignment, Submission, ImprovementPlan
+from .models import Questionnaire, Period, Assignment, Submission, ImprovementPlan,AcademicGroup,GroupSubject,GroupEnrollment
 
 
 def evaluation_user(request: Request, user=Depends(current_user)):
@@ -97,6 +97,248 @@ def create_questionnaire(payload: QuestionnairePayload, user=Depends(evaluation_
     commit(db)
     return questionnaire_data(q)
 
+class AcademicGroupPayload(Payload):
+    name: str = Field(min_length=2, max_length=80)
+    career: str = Field(min_length=3, max_length=150)
+    academic_term: str = Field(min_length=3, max_length=50)
+
+
+@router.post("/grupos", status_code=201)
+def create_academic_group(
+    payload: AcademicGroupPayload,
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    name = payload.name.strip()
+    career = payload.career.strip()
+    academic_term = payload.academic_term.strip()
+
+    existing = db.scalar(
+        select(AcademicGroup).where(
+            AcademicGroup.name == name,
+            AcademicGroup.academic_term == academic_term,
+        )
+    )
+
+    if existing:
+        raise HTTPException(
+            409,
+            "Ya existe un grupo con ese nombre y periodo académico.",
+        )
+
+    group = AcademicGroup(
+        name=name,
+        career=career,
+        academic_term=academic_term,
+    )
+
+    db.add(group)
+    db.flush()
+
+    event(db, user, f"EVD grupo académico {group.id} registrado")
+    commit(db)
+
+    return {
+        "id": group.id,
+        "name": group.name,
+        "career": group.career,
+        "academic_term": group.academic_term,
+    }
+
+
+@router.get("/grupos")
+def list_academic_groups(
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    groups = db.scalars(
+        select(AcademicGroup).order_by(
+            AcademicGroup.academic_term,
+            AcademicGroup.name,
+        )
+    ).all()
+
+    return [
+        {
+            "id": group.id,
+            "name": group.name,
+            "career": group.career,
+            "academic_term": group.academic_term,
+        }
+        for group in groups
+    ]
+
+@router.get("/grupos/{group_id}/estudiantes")
+def list_group_students(
+    group_id: int,
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    group = db.get(AcademicGroup, group_id)
+
+    if not group:
+        raise HTTPException(404, "Grupo académico no encontrado.")
+
+    rows = db.execute(
+        select(GroupEnrollment, User)
+        .join(User, User.id == GroupEnrollment.student_id)
+        .where(GroupEnrollment.group_id == group_id)
+        .order_by(User.name)
+    ).all()
+
+    return [
+        {
+            "id": enrollment.id,
+            "student_id": student.id,
+            "name": student.name,
+            "email": student.email,
+        }
+        for enrollment, student in rows
+    ]
+
+class GroupEnrollmentPayload(Payload):
+    student_id: str
+
+
+@router.post("/grupos/{group_id}/estudiantes", status_code=201)
+def enroll_student(
+    group_id: int,
+    payload: GroupEnrollmentPayload,
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    group = db.get(AcademicGroup, group_id)
+
+    if not group:
+        raise HTTPException(404, "Grupo académico no encontrado.")
+
+    student = db.get(User, payload.student_id)
+
+    if not student or student.role != "estudiante":
+        raise HTTPException(422, "Selecciona un estudiante válido.")
+
+    existing = db.scalar(
+        select(GroupEnrollment).where(
+            GroupEnrollment.group_id == group_id,
+            GroupEnrollment.student_id == payload.student_id,
+        )
+    )
+
+    if existing:
+        raise HTTPException(409, "El estudiante ya pertenece a este grupo.")
+
+    enrollment = GroupEnrollment(
+        group_id=group_id,
+        student_id=payload.student_id,
+    )
+
+    db.add(enrollment)
+    db.flush()
+
+    event(db, user, f"EVD estudiante inscrito en grupo {group_id}")
+    commit(db)
+
+    return {
+        "id": enrollment.id,
+        "group_id": enrollment.group_id,
+        "student_id": enrollment.student_id,
+    }
+
+class GroupSubjectPayload(Payload):
+    teacher_id: str
+    subject: str = Field(min_length=3, max_length=150)
+
+
+@router.post("/grupos/{group_id}/materias", status_code=201)
+def assign_group_subject(
+    group_id: int,
+    payload: GroupSubjectPayload,
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    group = db.get(AcademicGroup, group_id)
+
+    if not group:
+        raise HTTPException(404, "Grupo académico no encontrado.")
+
+    teacher = db.get(User, payload.teacher_id)
+
+    if not teacher or teacher.role != "docente":
+        raise HTTPException(422, "Selecciona un docente válido.")
+
+    existing = db.scalar(
+        select(GroupSubject).where(
+            GroupSubject.group_id == group_id,
+            GroupSubject.teacher_id == payload.teacher_id,
+            GroupSubject.subject == payload.subject,
+        )
+    )
+
+    if existing:
+        raise HTTPException(
+            409,
+            "Esta materia ya está asignada al docente en este grupo."
+        )
+
+    group_subject = GroupSubject(
+        group_id=group_id,
+        teacher_id=payload.teacher_id,
+        subject=payload.subject,
+    )
+
+    db.add(group_subject)
+    db.flush()
+
+    event(db, user, f"EVD materia asignada a grupo {group_id}")
+    commit(db)
+
+    return {
+        "id": group_subject.id,
+        "group_id": group_subject.group_id,
+        "teacher_id": group_subject.teacher_id,
+        "subject": group_subject.subject,
+    }
+
+@router.get("/grupos/{group_id}/materias")
+def list_group_subjects(
+    group_id: int,
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    group = db.get(AcademicGroup, group_id)
+
+    if not group:
+        raise HTTPException(404, "Grupo académico no encontrado.")
+
+    rows = db.execute(
+        select(GroupSubject, User.name)
+        .join(User, User.id == GroupSubject.teacher_id)
+        .where(GroupSubject.group_id == group_id)
+        .order_by(GroupSubject.subject, User.name)
+    ).all()
+
+    return [
+        {
+            "id": subject.id,
+            "group_id": subject.group_id,
+            "teacher_id": subject.teacher_id,
+            "teacher_name": teacher_name,
+            "subject": subject.subject,
+        }
+        for subject, teacher_name in rows
+    ]
 
 @router.get("/personas")
 def people(user=Depends(evaluation_user), db: Session = Depends(get_db)):
@@ -174,6 +416,101 @@ def transition_period(period_id: int, payload: PeriodTransition, user=Depends(ev
     return {"status": period.status, "version": period.version}
 
 
+class GroupAssignmentPayload(Payload):
+    period_id: int
+    group_id: int
+    group_subject_id: int
+
+
+@router.post("/asignaciones/grupo", status_code=201)
+def create_group_assignments(
+    payload: GroupAssignmentPayload,
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    period = period_record(db, payload.period_id, True)
+
+    if period.status != "borrador":
+        raise HTTPException(
+            409,
+            "Solo puedes asignar evaluaciones en periodos en borrador."
+        )
+
+    group = db.get(AcademicGroup, payload.group_id)
+
+    if not group:
+        raise HTTPException(404, "Grupo académico no encontrado.")
+
+    group_subject = db.get(GroupSubject, payload.group_subject_id)
+
+    if not group_subject or group_subject.group_id != group.id:
+        raise HTTPException(
+            422,
+            "La materia seleccionada no pertenece a este grupo."
+        )
+
+    teacher = db.get(User, group_subject.teacher_id)
+
+    if not teacher or teacher.role != "docente":
+        raise HTTPException(422, "El docente asignado no es válido.")
+
+    student_ids = db.scalars(
+        select(GroupEnrollment.student_id)
+        .join(User, User.id == GroupEnrollment.student_id)
+        .where(
+            GroupEnrollment.group_id == group.id,
+            User.role == "estudiante",
+        )
+        .distinct()
+    ).all()
+
+    if not student_ids:
+        raise HTTPException(
+            422,
+            "El grupo no tiene estudiantes inscritos."
+        )
+
+    existing_students = set(db.scalars(
+        select(Assignment.student_id).where(
+            Assignment.period_id == period.id,
+            Assignment.teacher_id == group_subject.teacher_id,
+            Assignment.subject == group_subject.subject,
+            Assignment.student_id.in_(student_ids),
+        )
+    ).all())
+
+    new_students = [
+        student_id
+        for student_id in student_ids
+        if student_id not in existing_students
+    ]
+
+    for student_id in new_students:
+        db.add(Assignment(
+            period_id=period.id,
+            student_id=student_id,
+            teacher_id=group_subject.teacher_id,
+            subject=group_subject.subject,
+            group_name=group.name,
+        ))
+
+    event(
+        db,
+        user,
+        f"EVD grupo {group.id}: {len(new_students)} asignaciones"
+    )
+
+    commit(db)
+
+    return {
+        "group_id": group.id,
+        "period_id": period.id,
+        "total_students": len(student_ids),
+        "created": len(new_students),
+        "existing": len(existing_students),
+    }
 class AssignmentPayload(Payload):
     period_id: int
     student_id: str

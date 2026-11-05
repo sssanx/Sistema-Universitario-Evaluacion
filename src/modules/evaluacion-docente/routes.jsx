@@ -5,7 +5,7 @@ import RoleRoute from "../../app/RoleRoute";
 const Layout = lazy(() => import("./Layout"));
 const Students = lazy(() =>
   import("./Student").then((m) => ({ default: m.StudentAssignments })),
-);
+);  
 const Answer = lazy(() =>
   import("./Student").then((m) => ({ default: m.AnswerEvaluation })),
 );
@@ -14,19 +14,24 @@ const Periods = lazy(() =>
 );
 const Questionnaires = lazy(() =>
   import("./Manage").then((m) => ({ default: m.Questionnaires })),
-);
+);  
 const Assignments = lazy(() =>
   import("./Manage").then((m) => ({ default: m.ManageAssignments })),
+);  
+
+const AcademicGroups = lazy(() =>
+  import("./AcademicGroups").then((m) => ({ default: m.AcademicGroups })),
 );
+
 const People = lazy(() =>
   import("./Manage").then((m) => ({ default: m.People })),
-);
+);  
 const Results = lazy(() =>
   import("./Reports").then((m) => ({ default: m.Results })),
-);
+);  
 const Comments = lazy(() =>
   import("./Reports").then((m) => ({ default: m.ModerateComments })),
-);
+);  
 const Subjects = lazy(() =>
   import("./Reports").then((m) => ({ default: m.TeacherSubjects })),
 );
@@ -81,6 +86,10 @@ export const evaluationRoutes = (
     <Route path="direccion/periodos" element={admin(<Periods />)} />
     <Route path="direccion/cuestionarios" element={admin(<Questionnaires />)} />
     <Route path="direccion/grupos" element={admin(<Assignments />)} />
+    <Route
+  path="direccion/grupos-academicos"
+  element={admin(<AcademicGroups />)}
+/>
     <Route
       path="direccion/docentes"
       element={admin(<People role="docente" />)}
