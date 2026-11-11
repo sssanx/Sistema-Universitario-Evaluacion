@@ -82,6 +82,7 @@ export const MODULES = [
       "direccion/periodos": "Periodos de evaluación",
       "direccion/cuestionarios": "Cuestionarios",
       "direccion/grupos": "Asignaciones",
+      "direccion/grupos-academicos": "Grupos académicos",
       "direccion/docentes": "Docentes",
       "direccion/estudiantes": "Estudiantes",
       "direccion/comentarios": "Revisar comentarios",
@@ -133,11 +134,13 @@ export function moduleLinks(module, role) {
         ["/evaluacion-docente/docente/asignaturas", "Asignaturas"],
         ["/evaluacion-docente/docente/planes", "Plan de mejora"],
       ];
+
 return [
   ["/evaluacion-docente/direccion/periodos", "Periodos"],
   ["/evaluacion-docente/direccion/cuestionarios", "Cuestionarios"],
   ["/evaluacion-docente/direccion/docentes", "Docentes"],
   ["/evaluacion-docente/direccion/estudiantes", "Estudiantes"],
+  ["/evaluacion-docente/direccion/grupos-academicos", "Grupos académicos"],
   ["/evaluacion-docente/direccion/grupos", "Asignaciones"],
   ["/evaluacion-docente/direccion/comentarios", "Comentarios"],
   ["/evaluacion-docente/direccion/resultados", "Resultados"],

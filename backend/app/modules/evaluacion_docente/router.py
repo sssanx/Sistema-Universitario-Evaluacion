@@ -1,19 +1,35 @@
+
 """EVD-01/06/10/12. Cuestionarios inmutables y resultados sin identidad estudiantil."""
+
 import csv
 import io
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
+
 from ...core.database import get_db
 from ...core.models import User, AccountEvent, Notification, now
 from ...core.security import current_user, require_role, PRODUCTION
-from .models import Questionnaire, Period, Assignment, Submission, ImprovementPlan,AcademicGroup,GroupSubject,GroupEnrollment
+
+from .models import (
+    Questionnaire,
+    Period,
+    Assignment,
+    Submission,
+    ImprovementPlan,
+    AcademicGroup,
+    GroupSubject,
+    GroupEnrollment,
+)
 
 
 def evaluation_user(request: Request, user=Depends(current_user)):
@@ -252,6 +268,235 @@ def enroll_student(
         "student_id": enrollment.student_id,
     }
 
+
+@router.post("/grupos/{group_id}/estudiantes/importar/vista-previa")
+async def preview_student_import(
+    group_id: int,
+    file: UploadFile = File(...),
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    group = db.get(AcademicGroup, group_id)
+    if not group:
+        raise HTTPException(404, "Grupo académico no encontrado.")
+
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(422, "Selecciona un archivo Excel .xlsx.")
+
+    # Limitar el archivo a 2 MB.
+    content = await file.read(2 * 1024 * 1024 + 1)
+    await file.close()
+
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(413, "El archivo supera el límite de 2 MB.")
+
+    try:
+        workbook = load_workbook(
+            io.BytesIO(content),
+            read_only=True,
+            data_only=True,
+        )
+    except (InvalidFileException, ValueError, OSError, EOFError, KeyError):
+        raise HTTPException(422, "El archivo Excel no es válido.")
+
+    try:
+        sheet = workbook.active
+        if sheet is None:
+            raise HTTPException(422, "El Excel no contiene hojas.")
+
+        rows = sheet.iter_rows(values_only=True)
+        header = next(rows, None)
+
+        if not header:
+            raise HTTPException(422, "El Excel está vacío.")
+
+        columns = {
+            str(value or "").strip().lower().replace("í", "i"): index
+            for index, value in enumerate(header)
+        }
+
+        if "matricula" not in columns or "correo" not in columns:
+            raise HTTPException(
+                422,
+                "El Excel debe tener las columnas matricula y correo.",
+            )
+
+        # Solo se revisan cuentas existentes del portal.
+        users = db.scalars(
+            select(User).where(User.role == "estudiante")
+        ).all()
+
+        by_matricula = {}
+        by_email = {}
+
+        for student in users:
+            try:
+                profile = json.loads(student.profile or "{}")
+                if not isinstance(profile, dict):
+                    profile = {}
+            except (ValueError, TypeError):
+                profile = {}
+
+            matricula = str(profile.get("matricula") or "").strip()
+            correo = student.email.strip().lower()
+
+            if matricula:
+                by_matricula.setdefault(matricula, []).append(student)
+            by_email.setdefault(correo, []).append(student)
+
+        enrolled = set(
+            db.scalars(
+                select(GroupEnrollment.student_id).where(
+                    GroupEnrollment.group_id == group_id
+                )
+            ).all()
+        )
+
+        results = []
+        seen = set()
+
+        for number, row in enumerate(rows, start=2):
+            if number > 1001:
+                raise HTTPException(
+                    422, "El máximo es de 1000 filas de estudiantes."
+                )
+
+            if not any(value is not None and str(value).strip() for value in row):
+                continue
+
+            def cell(column):
+                index = columns[column]
+                return str(row[index] or "").strip() if index < len(row) else ""
+
+            matricula = cell("matricula")
+            correo = cell("correo").lower()
+
+            record = {
+                "fila": number,
+                "matricula": matricula,
+                "correo": correo,
+                "nombre": "",
+                "student_id": None,
+                "estado": "error",
+                "motivo": "",
+            }
+
+            key = (matricula, correo)
+
+            if not matricula or not correo:
+                record["motivo"] = "Falta matrícula o correo."
+            elif key in seen:
+                record["estado"] = "duplicado"
+                record["motivo"] = "Registro repetido dentro del Excel."
+            else:
+                seen.add(key)
+                matches = by_matricula.get(matricula, [])
+                email_matches = by_email.get(correo, [])
+
+                if len(matches) > 1 or len(email_matches) > 1:
+                    record["motivo"] = "Datos ambiguos: hay cuentas repetidas."
+                elif not matches:
+                    record["motivo"] = "Matrícula no encontrada."
+                elif not email_matches or matches[0].id != email_matches[0].id:
+                    record["motivo"] = "La matrícula y el correo no coinciden."
+                else:
+                    student = matches[0]
+                    record["nombre"] = student.name
+                    record["student_id"] = student.id
+
+                    if student.id in enrolled:
+                        record["estado"] = "duplicado"
+                        record["motivo"] = "Ya está inscrito en el grupo."
+                    else:
+                        record["estado"] = "nuevo"
+                        record["motivo"] = "Listo para inscribir."
+                        enrolled.add(student.id)
+
+            results.append(record)
+
+        return {
+            "group_id": group_id,
+            "total": len(results),
+            "nuevos": sum(r["estado"] == "nuevo" for r in results),
+            "duplicados": sum(r["estado"] == "duplicado" for r in results),
+            "errores": sum(r["estado"] == "error" for r in results),
+            "registros": results,
+        }
+    finally:
+        workbook.close()
+
+        
+@router.post("/grupos/{group_id}/estudiantes/importar/confirmar")
+async def confirm_student_import(
+    group_id: int,
+    file: UploadFile = File(...),
+    user=Depends(evaluation_user),
+    db: Session = Depends(get_db),
+):
+    require_role(user, "administrador")
+
+    # Volver a validar el archivo original.
+    preview = await preview_student_import(
+        group_id=group_id,
+        file=file,
+        user=user,
+        db=db,
+    )
+
+    new_records = [
+        record for record in preview["registros"]
+        if record["estado"] == "nuevo"
+    ]
+
+    # Comprobar nuevamente los estudiantes inscritos.
+    enrolled = set(
+        db.scalars(
+            select(GroupEnrollment.student_id).where(
+                GroupEnrollment.group_id == group_id
+            )
+        ).all()
+    )
+
+    created = 0
+    additional_duplicates = 0
+
+    for record in new_records:
+        student_id = record["student_id"]
+
+        if student_id in enrolled:
+            additional_duplicates += 1
+            continue
+
+        db.add(
+            GroupEnrollment(
+                group_id=group_id,
+                student_id=student_id,
+            )
+        )
+
+        enrolled.add(student_id)
+        created += 1
+
+    if created:
+        event(
+            db,
+            user,
+            f"EVD grupo {group_id}: {created} estudiantes importados",
+        )
+        commit(db)
+
+    return {
+        "group_id": group_id,
+        "inscritos": created,
+        "duplicados": preview["duplicados"] + additional_duplicates,
+        "errores": preview["errores"],
+        "registros": preview["registros"],
+        "message": f"Importación finalizada: {created} estudiantes inscritos.",
+    }
+
+
 class GroupSubjectPayload(Payload):
     teacher_id: str
     subject: str = Field(min_length=3, max_length=150)
@@ -343,7 +588,46 @@ def list_group_subjects(
 @router.get("/personas")
 def people(user=Depends(evaluation_user), db: Session = Depends(get_db)):
     require_role(user, "administrador")
-    return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role} for u in db.scalars(select(User).where(User.role.in_(("estudiante", "docente"))).order_by(User.name))]
+
+    users = db.scalars(
+        select(User)
+        .where(User.role.in_(("estudiante", "docente")))
+        .order_by(User.name)
+    ).all()
+
+    result = []
+
+    for u in users:
+        try:
+            profile = json.loads(u.profile or "{}")
+            if not isinstance(profile, dict):
+                profile = {}
+        except (ValueError, TypeError):
+            profile = {}
+
+        carrera = profile.get("carrera") or ""
+        nivel = profile.get("nivel_academico") or ""
+
+        # Solo identificar el nivel si aparece explícitamente
+        # en el nombre de la carrera.
+        if not nivel:
+            if carrera.lower().startswith("ingeniería") or carrera.lower().startswith("ingenieria"):
+                nivel = "Ingeniería"
+            elif carrera.lower().startswith("tsu") or carrera.lower().startswith("técnico superior"):
+                nivel = "TSU"
+
+        result.append({
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "role": u.role,
+            "matricula": profile.get("matricula") or "",
+            "carrera": carrera,
+            "nivel_academico": nivel,
+            "cuatrimestre": profile.get("cuatrimestre") or "",
+        })
+
+    return result
 
 
 @router.get("/periodos")
