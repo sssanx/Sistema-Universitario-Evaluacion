@@ -23,7 +23,12 @@ ROLES = {
 
 PRODUCTION = os.getenv("APP_ENV") == "production"
 ORIGIN = os.getenv("APP_ORIGIN", "http://127.0.0.1:5173").rstrip("/")
-if PRODUCTION and not ORIGIN.startswith("https://"):
+ORIGINS = {
+    value.strip().rstrip("/")
+    for value in os.getenv("APP_ORIGINS", ORIGIN).split(",")
+    if value.strip()
+}
+if PRODUCTION and any(not origin.startswith("https://") for origin in ORIGINS):
     raise RuntimeError("APP_ORIGIN debe utilizar HTTPS en producción.")
 
 

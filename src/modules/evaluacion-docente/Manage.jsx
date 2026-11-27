@@ -387,8 +387,69 @@ export function ManageAssignments() {
   const state = useAsync(() => api(`${BASE}/asignaciones`), []),
     people = useAsync(() => api(`${BASE}/personas`), []),
     periods = useAsync(() => api(`${BASE}/periodos`), []);
+    const groupedAssignments = Object.values(
+  (state.data || []).reduce((groups, assignment) => {
+    const key = [
+      assignment.period_id,
+      assignment.group_name,
+      assignment.teacher_id,
+      assignment.subject
+    ].join("|");
+
+    if (!groups[key]) {
+      groups[key] = {
+        key,
+        period_title: assignment.period_title,
+        group_name: assignment.group_name,
+        teacher_name: assignment.teacher_name,
+        subject: assignment.subject,
+        total: 0,
+        submitted: 0
+      };
+    }
+
+    groups[key].total++;
+
+    if (assignment.submitted) {
+      groups[key].submitted++;
+    }
+
+    return groups;
+  }, {})
+);
   const [dialog, setDialog] = useState(false),
     mutation = useMutation();
+
+    const [teacherFilter, setTeacherFilter] = useState("");
+const [subjectFilter, setSubjectFilter] = useState("");
+const [groupFilter, setGroupFilter] = useState("");
+const [periodFilter, setPeriodFilter] = useState("");
+
+const uniqueOptions = (values) =>
+  [...new Set(values.filter(Boolean))].sort((a, b) =>
+    String(a).localeCompare(String(b), "es")
+  );
+
+const teacherOptions = uniqueOptions(
+  groupedAssignments.map((a) => a.teacher_name)
+);
+const subjectOptions = uniqueOptions(
+  groupedAssignments.map((a) => a.subject)
+);
+const groupOptions = uniqueOptions(
+  groupedAssignments.map((a) => a.group_name)
+);
+const periodOptions = uniqueOptions(
+  groupedAssignments.map((a) => a.period_title)
+);
+
+const filteredAssignments = groupedAssignments.filter(
+  (a) =>
+    (!teacherFilter || a.teacher_name === teacherFilter) &&
+    (!subjectFilter || a.subject === subjectFilter) &&
+    (!groupFilter || a.group_name === groupFilter) &&
+    (!periodFilter || a.period_title === periodFilter)
+);
   async function submit(e) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -414,23 +475,49 @@ export function ManageAssignments() {
     <>
       <Heading
         eyebrow="Evaluación docente / Preparación"
-        title="Asignaciones por periodo"
-        action={
-          <button
-            className="button button-primary"
-            onClick={() => {
-              mutation.clear();
-              setDialog(true);
-            }}
-          >
-            Registrar asignación
-          </button>
-        }
-      >
-        Vincula estudiante, docente y asignatura antes de abrir la recepción.
-        Cada asignación admite una evaluación.
+        title="Seguimiento de evaluaciones por periodo">
+        Consulta las evaluaciones asignadas por periodo, grupo, materia y docente,
+        así como la participación y las pendientes. Para grupos completos,
+        genera las evaluaciones desde Grupos académicos.
       </Heading>
       {!dialog && <MutationState state={mutation} />}
+
+      <div className="work-toolbar">
+        {[
+          ["Docente", teacherFilter, setTeacherFilter, teacherOptions],
+          ["Materia", subjectFilter, setSubjectFilter, subjectOptions],
+          ["Grupo", groupFilter, setGroupFilter, groupOptions],
+          ["Periodo", periodFilter, setPeriodFilter, periodOptions],
+        ].map(([label, value, setValue, options]) => (
+          <Field
+            key={label}
+            label={label}
+            as="select"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          >
+            <option value="">Todos</option>
+            {options.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </Field>
+        ))}
+
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={() => {
+            setTeacherFilter("");
+            setSubjectFilter("");
+            setGroupFilter("");
+            setPeriodFilter("");
+          }}
+        >
+          Limpiar filtros
+        </button>
+      </div>
       <LoadState state={state} empty="No hay asignaciones registradas">
         <div
           className="work-table"
@@ -438,40 +525,48 @@ export function ManageAssignments() {
           aria-label="Asignaciones"
           tabIndex={0}
         >
-          <table>
-            <thead>
-              <tr>
-                <th>Periodo y asignatura</th>
-                <th>Docente</th>
-                <th>Estudiante</th>
-                <th>Grupo</th>
-                <th>Participación</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.data?.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    {a.subject}
-                    <small>{a.period_title}</small>
-                  </td>
-                  <td>{a.teacher_name}</td>
-                  <td>{a.student_name}</td>
-                  <td>{a.group_name}</td>
-                  <td>
-                    <Status value={a.submitted ? "enviada" : "pendiente"}>
-                      {a.submitted ? "Enviada" : "Pendiente"}
-                    </Status>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+         <table>
+  <thead>
+    <tr>
+      <th>Periodo y asignatura</th>
+      <th>Docente</th>
+      <th>Grupo</th>
+      <th>Estudiantes</th>
+      <th>Participación</th>
+    </tr>
+  </thead>
+
+  <tbody>
+{filteredAssignments.map((group) => (
+        <tr key={group.key}>
+        <td>
+          {group.subject}
+          <small>{group.period_title}</small>
+        </td>
+
+        <td>{group.teacher_name}</td>
+
+        <td>{group.group_name}</td>
+
+        <td>{group.total}</td>
+
+        <td>
+          <strong>
+            {group.submitted} de {group.total}
+          </strong>
+          <small>
+            {group.total - group.submitted} pendientes
+          </small>
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
         </div>
       </LoadState>
       {dialog && (
         <Modal
-          title="Registrar asignación de evaluación"
+          title="Asignación individual excepcional"
           onClose={() => {
             if (!mutation.busy) setDialog(false);
           }}
@@ -480,6 +575,11 @@ export function ManageAssignments() {
             <LoadState state={people}>
               <form onSubmit={submit}>
                 <MutationState state={mutation} />
+                <p className="work-help">
+                  Usa este formulario solo para casos especiales, por ejemplo,
+                  cuando deba evaluarse a un estudiante individual. Para asignar
+                  un grupo completo, utiliza Grupos académicos → Generar evaluaciones.
+                </p>
                 {!drafts.length && (
                   <p className="work-note">
                     Prepara un periodo antes de registrar asignaciones.{" "}
@@ -551,7 +651,7 @@ export function ManageAssignments() {
                     disabled={!drafts.length}
                     className="button button-primary"
                   >
-                    Guardar asignación
+                    Guardar asignación individual
                   </BusyButton>
                   <button
                     className="button button-secondary"

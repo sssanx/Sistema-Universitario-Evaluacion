@@ -62,3 +62,88 @@ class ImprovementPlan(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (UniqueConstraint("period_id", "teacher_id", name="one_evaluation_plan"),)
+
+class AcademicGroup(Base):
+    __tablename__ = "academic_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    career: Mapped[str] = mapped_column(String(150))
+    academic_term: Mapped[str] = mapped_column(String(50))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "name",
+            "academic_term",
+            name="unique_academic_group_term",
+        ),
+    )
+
+
+class GroupEnrollment(Base):
+    __tablename__ = "group_enrollments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_groups.id"),
+        index=True,
+    )
+    student_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"),
+        index=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "group_id",
+            "student_id",
+            name="unique_group_student",
+        ),
+    )
+
+
+class GroupSubject(Base):
+    __tablename__ = "group_subjects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_groups.id"),
+        index=True,
+    )
+    teacher_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"),
+        index=True,
+    )
+    subject: Mapped[str] = mapped_column(String(150))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "group_id",
+            "teacher_id",
+            "subject",
+            name="unique_group_teacher_subject",
+        ),
+    )
+
+class AcademicFeedback(Base):
+    __tablename__ = "evaluation_academic_feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    period_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluation_periods.id")
+    )
+    teacher_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id")
+    )
+    feedback: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "period_id",
+            "teacher_id",
+            name="one_academic_feedback_per_teacher_period",
+        ),
+    )

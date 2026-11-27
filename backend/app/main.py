@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from .core.auth import router as auth_router
 from .core.google_oauth import router as google_router
-from .core.security import ORIGIN, PRODUCTION
+from .core.security import ORIGINS, PRODUCTION
 from .modules.titulacion.router import router as titles_router
 from .modules.becas.router import router as becas_router
 from .modules.evaluacion_docente.router import router as evaluations_router
@@ -24,7 +24,7 @@ app = FastAPI(
 async def security(request: Request, call_next):
     if request.method not in ["GET", "HEAD", "OPTIONS"]:
         origin = request.headers.get("origin")
-        if origin and origin.rstrip("/") != ORIGIN:
+        if origin and origin.rstrip("/") not in ORIGINS:
             return JSONResponse({"detail": "Origen no autorizado."}, status_code=403)
         if request.headers.get("sec-fetch-site") == "cross-site":
             return JSONResponse(
